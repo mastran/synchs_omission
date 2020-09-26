@@ -631,10 +631,11 @@ void HotStuffBase::set_propagate_timer(const Echo &echo, double t_sec) {
 
 void HotStuffBase::stop_propagate_timer(const uint256_t &blk_hash) {
     propagate_timers.erase(blk_hash);
+    propagate_timeouts[blk_hash] = true;    
 }
 
 bool HotStuffBase::is_propagate_timeout(const uint256_t &msg_hash){
-    return propagate_timers[msg_hash] ? false: true;
+    return propagate_timeouts[msg_hash];
 }
 
 void HotStuffBase::set_ack_timer(const Ack &ack, double t_sec) {

@@ -400,6 +400,7 @@ class HotStuffBase: public HotStuffCore {
     std::unordered_map<const uint256_t, TimerEvent> ack_timers;
     std::unordered_map<uint32_t, TimerEvent> precommit_timers;
 
+    std::unordered_map<const uint256_t, bool> propagate_timeouts;
 };
 
 /** HotStuff protocol (templated by cryptographic implementation). */
