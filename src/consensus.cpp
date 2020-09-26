@@ -505,7 +505,7 @@ void HotStuffCore::on_receive_ack(const Ack &ack){
 
     if (!propagate_acks[msg_hash].insert(ack.rid).second)
     {
-        LOG_WARN("duplicate ack for %s from %d", get_hex10(msg_hash).c_str(), echo.rid);
+        LOG_WARN("duplicate ack for %s from %d", get_hex10(msg_hash).c_str(), ack.rid);
         return;
     }
     if (qsize + 1 == config.nmajority && !is_ack_timeout(msg_hash))
@@ -519,7 +519,7 @@ void HotStuffCore::on_receive_ack(const Ack &ack){
 
 void HotStuffCore::on_propose_propagated(const uint256_t &blk_hash) {
     if (view_trans) return;
-    LOG_PROTO("propagated %s", std::string(blk).c_str());
+    LOG_PROTO("propagated %s", std::string(blk_hash.to_hex()).c_str());
     block_t blk = get_delivered_blk(blk_hash);
     sanity_check_delivered(blk);
 
@@ -544,7 +544,7 @@ void HotStuffCore::on_receive_pre_commit(const PreCommit &preCommit) {
     if (qsize >= config.nmajority) return;
     if (!blk->preCommitted.insert(preCommit.rid).second)
     {
-        LOG_WARN("duplicate preCommit for %s from %d", get_hex10(vote.blk_hash).c_str(), vote.voter);
+        LOG_WARN("duplicate preCommit for %s from %d", get_hex10(preCommit.blk_hash).c_str(), preCommit.rid);
         return;
     }
     // Commit blk

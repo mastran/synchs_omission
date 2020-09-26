@@ -634,7 +634,7 @@ void HotStuffBase::stop_propagate_timer(const uint256_t &blk_hash) {
 }
 
 bool HotStuffBase::is_propagate_timeout(const uint256_t &msg_hash){
-    return propagate_timers[msg_hash]) ? false: true;
+    return propagate_timers[msg_hash] ? false: true;
 }
 
 void HotStuffBase::set_ack_timer(const Ack &ack, double t_sec) {
@@ -650,7 +650,7 @@ void HotStuffBase::stop_ack_timer(const uint256_t &msg_hash){
 }
 
 bool HotStuffBase::is_ack_timeout(const uint256_t &msg_hash){
-    return ack_timers[msg_hash]) ? false: true;
+    return ack_timers[msg_hash] ? false: true;
 }
 
 
@@ -667,7 +667,7 @@ void HotStuffBase::echo_handler(MsgEcho &&msg, const Net::conn_t &conn) {
             e->verify(vpool),
     }).then([this, e=std::move(e)](const promise::values_t values) {
         if (!promise::any_cast<bool>(values[1]))
-            LOG_WARN("invalid echo from %d", v->voter);
+            LOG_WARN("invalid echo from %d", e->rid);
         else
             on_receive_echo(*e);
     });
@@ -685,7 +685,7 @@ void HotStuffBase::ack_handler(MsgAck &&msg, const Net::conn_t &conn) {
             e->verify(vpool)
     }).then([this, e=std::move(e)](const promise::values_t values) {
         if (!promise::any_cast<bool>(values[0]))
-            LOG_WARN("invalid ack from %d", v->voter);
+            LOG_WARN("invalid ack from %d", e->rid);
         else
             on_receive_ack(*e);
     });
@@ -722,8 +722,9 @@ void HotStuffBase::pre_commit_handler(MsgPreCommit &&msg, const Net::conn_t &con
             p->verify(vpool)
     }).then([this, p=std::move(p)](const promise::values_t values) {
         if (!promise::any_cast<bool>(values[0]))
-            LOG_WARN("invalid pre_commit from %d", v->voter);
+            LOG_WARN("invalid pre_commit from %d", p->rid);
         else
             on_receive_pre_commit(*p);
     });
+}
 }
