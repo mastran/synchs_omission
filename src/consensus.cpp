@@ -97,6 +97,7 @@ void HotStuffCore::update_hqc(const block_t &_hqc, const quorum_cert_bt &qc) {
 void HotStuffCore::check_commit(const block_t &blk) {
     std::vector<block_t> commit_queue;
     block_t b;
+    if (blk->get_height() == 0) return;
     for (b = blk; b->height > b_exec->height; b = b->parents[0])
     { /* TODO: also commit the uncles/aunts */
         commit_queue.push_back(b);
@@ -190,7 +191,7 @@ block_t HotStuffCore::on_propose(const std::vector<uint256_t> &cmds,
         throw std::runtime_error("new block should be higher than vheight");
     vheight = bnew->height;
     finished_propose[bnew] = true;
-    _vote(bnew);
+    _propagate_blk(bnew);
     on_propose_(prop);
     /* boradcast to other replicas */
     do_broadcast_proposal(prop);
@@ -461,6 +462,7 @@ void HotStuffCore::_propagate_blk(const block_t &blk) {
                 create_part_cert(*priv_key, Echo::proof_obj_hash(blk_hash)), this);
 
     do_broadcast_echo(echo);
+    on_receive_echo(echo);
     set_propagate_timer(echo, 3 * config.delta);
 }
 
@@ -470,7 +472,7 @@ void HotStuffCore::on_receive_echo(const Echo &echo){
     assert(echo.cert);
 
     size_t qsize = propagate_echos[msg_hash].size();
-    if (qsize >= config.nmajority) return;
+
     if (!propagate_echos[msg_hash].insert(echo.rid).second)
     {
         LOG_WARN("duplicate echo for %s from %d", get_hex10(msg_hash).c_str(), echo.rid);
@@ -488,10 +490,21 @@ void HotStuffCore::on_receive_echo(const Echo &echo){
 
             Ack ack(id, msg_hash, PropagateType::BLOCK,
                     create_part_cert(*priv_key, Ack::proof_obj_hash(msg_hash)), this);
-            do_broadcast_ack(ack);
+            do_multicast_ack(ack, propagate_echos[msg_hash]);
+            auto iter = propagate_echos[msg_hash].find(id);
+            if (iter != propagate_echos[msg_hash].end())
+                on_receive_ack(ack);
             set_ack_timer(ack, 2 * config.delta);
         }
         //Todo: Add conditions for propagation of blame.
+    }
+
+    if (qsize + 1 > config.nmajority && !is_ack_timeout(msg_hash)) {
+        Ack ack(id, msg_hash, PropagateType::BLOCK,
+                create_part_cert(*priv_key, Ack::proof_obj_hash(msg_hash)), this);        
+        do_send_ack(ack, echo.rid);
+        if (echo.rid == id)
+            on_receive_ack(ack);
     }
 }
 
@@ -505,7 +518,7 @@ void HotStuffCore::on_receive_ack(const Ack &ack){
 
     if (!propagate_acks[msg_hash].insert(ack.rid).second)
     {
-        LOG_WARN("duplicate ack for %s from %d", get_hex10(msg_hash).c_str(), echo.rid);
+        LOG_WARN("duplicate ack for %s from %d", get_hex10(msg_hash).c_str(), ack.rid);
         return;
     }
     if (qsize + 1 == config.nmajority && !is_ack_timeout(msg_hash))
@@ -519,7 +532,7 @@ void HotStuffCore::on_receive_ack(const Ack &ack){
 
 void HotStuffCore::on_propose_propagated(const uint256_t &blk_hash) {
     if (view_trans) return;
-    LOG_PROTO("propagated %s", std::string(blk).c_str());
+    LOG_PROTO("propagated %s", std::string(blk_hash.to_hex()).c_str());
     block_t blk = get_delivered_blk(blk_hash);
     sanity_check_delivered(blk);
 
@@ -533,6 +546,7 @@ void HotStuffCore::on_pre_commit_timeout(const block_t &blk) {
     PreCommit preCommit(id, blk->get_hash(),
                 create_part_cert(*priv_key, PreCommit::proof_obj_hash(blk->get_hash())), this);
     do_broadcast_pre_commit(preCommit);
+    on_receive_pre_commit(preCommit);    
 }
 
 void HotStuffCore::on_receive_pre_commit(const PreCommit &preCommit) {
@@ -544,7 +558,7 @@ void HotStuffCore::on_receive_pre_commit(const PreCommit &preCommit) {
     if (qsize >= config.nmajority) return;
     if (!blk->preCommitted.insert(preCommit.rid).second)
     {
-        LOG_WARN("duplicate preCommit for %s from %d", get_hex10(vote.blk_hash).c_str(), vote.voter);
+        LOG_WARN("duplicate preCommit for %s from %d", get_hex10(preCommit.blk_hash).c_str(), preCommit.rid);
         return;
     }
     // Commit blk

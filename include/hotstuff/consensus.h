@@ -222,6 +222,8 @@ class HotStuffCore {
     virtual bool is_propagate_timeout(const uint256_t &msg_hash) = 0;
 
     virtual void do_broadcast_ack(const Ack &ack) = 0;
+    virtual void do_multicast_ack(const Ack &ack, std::unordered_set<ReplicaID> dests) = 0;
+    virtual void do_send_ack(const Ack &ack, ReplicaID dest) = 0;    
     virtual void set_ack_timer(const Ack &ack, double t_sec) = 0;
     virtual void stop_ack_timer(const uint256_t &msg_hash) = 0;
     virtual bool is_ack_timeout(const uint256_t &msg_hash) = 0;
