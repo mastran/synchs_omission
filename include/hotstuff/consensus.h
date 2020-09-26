@@ -35,6 +35,9 @@ struct Notify;
 struct Blame;
 struct BlameNotify;
 struct Finality;
+struct Echo;
+struct Ack;
+struct PreCommit;
 
 /** Abstraction for HotStuff protocol state machine (without network implementation). */
 class HotStuffCore {
@@ -203,12 +206,49 @@ class HotStuffCore {
     uint32_t get_view() const { return view; }
     operator std::string () const;
     void set_vote_disabled(bool f) { vote_disabled = f; }
+
+    private:
+    void _propagate_blk(const block_t &blk);
+    void on_propose_propagated(const uint256_t &blk_hash);
+
+    protected:
+
+    std::unordered_map<const uint256_t, std::unordered_set<ReplicaID>> propagate_echos;
+    std::unordered_map<const uint256_t, std::unordered_set<ReplicaID>> propagate_acks;
+
+    virtual void do_broadcast_echo(const Echo &echo) = 0;
+    virtual void set_propagate_timer(const Echo &echo, double t_sec) = 0;
+    virtual void stop_propagate_timer(const uint256_t &msg_hash) = 0;
+    virtual bool is_propagate_timeout(const uint256_t &msg_hash) = 0;
+
+    virtual void do_broadcast_ack(const Ack &ack) = 0;
+    virtual void set_ack_timer(const Ack &ack, double t_sec) = 0;
+    virtual void stop_ack_timer(const uint256_t &msg_hash) = 0;
+    virtual bool is_ack_timeout(const uint256_t &msg_hash) = 0;
+
+    virtual void do_broadcast_pre_commit(const PreCommit &preCommit) = 0;
+    virtual void set_pre_commit_timer(const block_t &blk, double t_sec) = 0;
+    virtual void stop_pre_commit_timer(uint32_t height) = 0;
+
+    public:
+    void on_receive_echo(const Echo &echo);
+    void on_receive_ack(const Ack &ack);
+    void on_pre_commit_timeout(const block_t &blk);
+    void on_receive_pre_commit(const PreCommit &preCommit);
+
+
 };
 
 
 enum ProofType {
     VOTE = 0x00,
-    BLAME = 0x01
+    BLAME = 0x01,
+    PROPAGATE = 0x02,
+    PRE_COMMIT = 0x03,
+};
+
+enum PropagateType {
+    BLOCK = 0x00,
 };
 
 /** Abstraction for proposal messages. */
@@ -547,6 +587,221 @@ struct Finality: public Serializable {
         return std::move(s);
     }
 };
+
+/** Abstraction for echo messages. */
+struct Echo: public Serializable {
+    ReplicaID rid;
+//    /** message hash being propagated */
+    uint256_t blk_hash;
+
+    /* Opcode determines the type of message.
+     * 0x01 means Block proposal
+     * */
+    uint8_t opcode;
+
+    part_cert_bt cert;
+
+    /** handle of the core object to allow polymorphism */
+    HotStuffCore *hsc;
+
+    Echo(): cert(nullptr), hsc(nullptr) {}
+    Echo(ReplicaID rid,
+         const uint256_t &blk_hash,
+         uint8_t opcode,
+         part_cert_bt &&cert,
+         HotStuffCore *hsc):
+            rid(rid),
+            blk_hash(blk_hash),
+            opcode(opcode),
+            cert(std::move(cert)), hsc(hsc) {}
+
+    Echo(const Echo &other):
+            rid(other.rid),
+            blk_hash(other.blk_hash),
+            opcode(other.opcode),
+            cert(other.cert ? other.cert->clone() : nullptr),
+            hsc(other.hsc) {}
+
+    Echo(Echo &&other) = default;
+
+    void serialize(DataStream &s) const override {
+        s << rid << blk_hash << opcode << *cert;
+    }
+
+    void unserialize(DataStream &s) override {
+        assert(hsc != nullptr);
+        s >> rid >> blk_hash >> opcode;
+        cert = hsc->parse_part_cert(s);
+    }
+
+    static uint256_t proof_obj_hash(const uint256_t &msg_hash) {
+        DataStream p;
+        p << (uint8_t)ProofType::PROPAGATE << msg_hash;
+        return p.get_hash();
+    }
+
+    bool verify() const {
+        assert(hsc != nullptr);
+        return cert->verify(hsc->get_config().get_pubkey(rid)) &&
+               cert->get_obj_hash() == proof_obj_hash(blk_hash);
+    }
+
+    promise_t verify(VeriPool &vpool) const {
+        assert(hsc != nullptr);
+        return cert->verify(hsc->get_config().get_pubkey(rid), vpool).then([this](bool result) {
+            return result && cert->get_obj_hash() == proof_obj_hash(blk_hash);
+        });
+    }
+
+    operator std::string () const {
+        DataStream s;
+        s << "<echo "
+          << "rid=" << std::to_string(rid) << " "
+          << "msg=" << get_hex10(blk_hash) << ">";
+        return std::move(s);
+    }
+};
+
+/** Abstraction for ack messages. */
+struct Ack: public Serializable {
+    ReplicaID rid;
+//    /** message hash being propagated */
+    uint256_t blk_hash;
+
+    /* Opcode determines the type of message.
+     * 0x01 means Block Proposal
+     * */
+    uint8_t opcode;
+
+    part_cert_bt cert;
+
+    /** handle of the core object to allow polymorphism */
+    HotStuffCore *hsc;
+
+    Ack(): cert(nullptr), hsc(nullptr) {}
+    Ack(ReplicaID rid,
+         const uint256_t &blk_hash,
+         uint8_t opcode,
+         part_cert_bt &&cert,
+         HotStuffCore *hsc):
+            rid(rid),
+            blk_hash(blk_hash),
+            opcode(opcode),
+            cert(std::move(cert)), hsc(hsc) {}
+
+    Ack(const Ack &other):
+            rid(other.rid),
+            blk_hash(other.blk_hash),
+            opcode(other.opcode),
+            cert(other.cert ? other.cert->clone() : nullptr),
+            hsc(other.hsc) {}
+
+    Ack(Ack &&other) = default;
+
+    void serialize(DataStream &s) const override {
+        s << rid << blk_hash << opcode << *cert;
+    }
+
+    void unserialize(DataStream &s) override {
+        assert(hsc != nullptr);
+        s >> rid >> blk_hash >> opcode;
+        cert = hsc->parse_part_cert(s);
+    }
+
+    static uint256_t proof_obj_hash(const uint256_t &msg_hash) {
+        DataStream p;
+        p << (uint8_t)ProofType::PROPAGATE << msg_hash;
+        return p.get_hash();
+    }
+
+    bool verify() const {
+        assert(hsc != nullptr);
+        return cert->verify(hsc->get_config().get_pubkey(rid)) &&
+               cert->get_obj_hash() == proof_obj_hash(blk_hash);
+    }
+
+    promise_t verify(VeriPool &vpool) const {
+        assert(hsc != nullptr);
+        return cert->verify(hsc->get_config().get_pubkey(rid), vpool).then([this](bool result) {
+            return result && cert->get_obj_hash() == proof_obj_hash(blk_hash);
+        });
+    }
+
+    operator std::string () const {
+        DataStream s;
+        s << "<ack "
+          << "rid=" << std::to_string(rid) << " "
+          << "msg=" << get_hex10(blk_hash) << ">";
+        return std::move(s);
+    }
+};
+
+/** Abstraction for Pre-commit messages. */
+struct PreCommit: public Serializable {
+    ReplicaID rid;
+//    /** block hash */
+    uint256_t blk_hash;
+
+    part_cert_bt cert;
+
+    /** handle of the core object to allow polymorphism */
+    HotStuffCore *hsc;
+
+    PreCommit(): cert(nullptr), hsc(nullptr) {}
+    PreCommit(ReplicaID rid,
+        const uint256_t &blk_hash,
+        part_cert_bt &&cert,
+        HotStuffCore *hsc):
+            rid(rid),
+            blk_hash(blk_hash),
+            cert(std::move(cert)), hsc(hsc) {}
+
+    PreCommit(const PreCommit &other):
+            rid(other.rid),
+            blk_hash(other.blk_hash),
+            cert(other.cert ? other.cert->clone() : nullptr),
+            hsc(other.hsc) {}
+
+    PreCommit(PreCommit &&other) = default;
+
+    void serialize(DataStream &s) const override {
+        s << rid << blk_hash << *cert;
+    }
+
+    void unserialize(DataStream &s) override {
+        assert(hsc != nullptr);
+        s >> rid >> blk_hash;
+        cert = hsc->parse_part_cert(s);
+    }
+
+    static uint256_t proof_obj_hash(const uint256_t &msg_hash) {
+        DataStream p;
+        p << (uint8_t)ProofType::PRE_COMMIT << msg_hash;
+        return p.get_hash();
+    }
+
+    bool verify() const {
+        assert(hsc != nullptr);
+        return cert->verify(hsc->get_config().get_pubkey(rid)) &&
+               cert->get_obj_hash() == proof_obj_hash(blk_hash);
+    }
+
+    promise_t verify(VeriPool &vpool) const {
+        assert(hsc != nullptr);
+        return cert->verify(hsc->get_config().get_pubkey(rid), vpool).then([this](bool result) {
+            return result && cert->get_obj_hash() == proof_obj_hash(blk_hash);
+        });
+    }
+
+    operator std::string () const {
+        DataStream s;
+        s << "<pre_commit "
+          << "rid=" << std::to_string(rid) << " "
+          << "blk=" << get_hex10(blk_hash) << ">";
+        return std::move(s);
+    }
+};
+
 
 }
 

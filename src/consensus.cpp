@@ -130,7 +130,7 @@ void HotStuffCore::_vote(const block_t &blk) {
     on_receive_vote(vote);
 #endif
     do_broadcast_vote(vote);
-    set_commit_timer(blk, 2 * config.delta);
+//    set_commit_timer(blk, 2 * config.delta);
     //set_blame_timer(3 * config.delta);
 }
 
@@ -238,7 +238,8 @@ void HotStuffCore::on_receive_proposal(const Proposal &prop) {
     finished_propose[bnew] = true;
     on_receive_proposal_(prop);
     // check if the proposal extends the highest certified block
-    if (opinion && !vote_disabled) _vote(bnew);
+//    if (opinion && !vote_disabled) _vote(bnew);
+    if (opinion) _propagate_blk(bnew);
 }
 
 void HotStuffCore::on_receive_vote(const Vote &vote) {
@@ -450,6 +451,104 @@ HotStuffCore::operator std::string () const {
       << "view=" << std::to_string(view) << " "
       << "tails=" << std::to_string(tails.size()) << ">";
     return std::move(s);
+}
+
+// 2. Echo
+void HotStuffCore::_propagate_blk(const block_t &blk) {
+    const auto &blk_hash = blk->get_hash();
+    LOG_PROTO("propagate for %s", get_hex10(blk_hash).c_str());
+    Echo echo(id, blk_hash, PropagateType::BLOCK,
+                create_part_cert(*priv_key, Echo::proof_obj_hash(blk_hash)), this);
+
+    do_broadcast_echo(echo);
+    set_propagate_timer(echo, 3 * config.delta);
+}
+
+void HotStuffCore::on_receive_echo(const Echo &echo){
+    LOG_PROTO("got %s", std::string(echo).c_str());
+    const uint256_t msg_hash = echo.blk_hash;
+    assert(echo.cert);
+
+    size_t qsize = propagate_echos[msg_hash].size();
+    if (qsize >= config.nmajority) return;
+    if (!propagate_echos[msg_hash].insert(echo.rid).second)
+    {
+        LOG_WARN("duplicate echo for %s from %d", get_hex10(msg_hash).c_str(), echo.rid);
+        return;
+    }
+    if (qsize + 1 == config.nmajority && !is_propagate_timeout(msg_hash))
+    {
+        if(echo.opcode == PropagateType::BLOCK) {
+            block_t blk = get_delivered_blk(echo.blk_hash);
+
+            // Todo: fix proposer and infinite forwarding
+            Proposal proposal(id, blk, this);
+            do_broadcast_proposal(proposal);
+            //Todo: may be propose next blocks.
+
+            Ack ack(id, msg_hash, PropagateType::BLOCK,
+                    create_part_cert(*priv_key, Ack::proof_obj_hash(msg_hash)), this);
+            do_broadcast_ack(ack);
+            set_ack_timer(ack, 2 * config.delta);
+        }
+        //Todo: Add conditions for propagation of blame.
+    }
+}
+
+void HotStuffCore::on_receive_ack(const Ack &ack){
+    LOG_PROTO("got %s", std::string(ack).c_str());
+    const uint256_t msg_hash = ack.blk_hash;
+    assert(ack.cert);
+
+    size_t qsize = propagate_acks[msg_hash].size();
+    if (qsize >= config.nmajority) return;
+
+    if (!propagate_acks[msg_hash].insert(ack.rid).second)
+    {
+        LOG_WARN("duplicate ack for %s from %d", get_hex10(msg_hash).c_str(), echo.rid);
+        return;
+    }
+    if (qsize + 1 == config.nmajority && !is_ack_timeout(msg_hash))
+    {
+        if(ack.opcode == PropagateType::BLOCK){
+            on_propose_propagated(msg_hash);
+        }
+        //Todo: Add conditions for propagation of blame.
+    }
+}
+
+void HotStuffCore::on_propose_propagated(const uint256_t &blk_hash) {
+    if (view_trans) return;
+    LOG_PROTO("propagated %s", std::string(blk).c_str());
+    block_t blk = get_delivered_blk(blk_hash);
+    sanity_check_delivered(blk);
+
+    if (!vote_disabled) _vote(blk);
+
+    set_pre_commit_timer(blk->get_parents()[0], 2*config.delta);
+}
+
+void HotStuffCore::on_pre_commit_timeout(const block_t &blk) {
+    // Todo: send pre-commit message
+    PreCommit preCommit(id, blk->get_hash(),
+                create_part_cert(*priv_key, PreCommit::proof_obj_hash(blk->get_hash())), this);
+    do_broadcast_pre_commit(preCommit);
+}
+
+void HotStuffCore::on_receive_pre_commit(const PreCommit &preCommit) {
+    LOG_PROTO("got %s", std::string(preCommit).c_str());
+    assert(preCommit.cert);
+    block_t blk = get_delivered_blk(preCommit.blk_hash);
+
+    size_t qsize = blk->preCommitted.size();
+    if (qsize >= config.nmajority) return;
+    if (!blk->preCommitted.insert(preCommit.rid).second)
+    {
+        LOG_WARN("duplicate preCommit for %s from %d", get_hex10(vote.blk_hash).c_str(), vote.voter);
+        return;
+    }
+    // Commit blk
+    if (qsize + 1 == config.nmajority) check_commit(blk);
 }
 
 }

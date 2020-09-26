@@ -83,6 +83,27 @@ MsgRespBlock::MsgRespBlock(const std::vector<block_t> &blks) {
     for (auto blk: blks) serialized << *blk;
 }
 
+const opcode_t MsgEcho::opcode;
+MsgEcho::MsgEcho(const Echo &echo) { serialized << echo; }
+void MsgEcho::postponed_parse(HotStuffCore *hsc) {
+    echo.hsc = hsc;
+    serialized >> echo;
+}
+
+const opcode_t MsgAck::opcode;
+MsgAck::MsgAck(const Ack &ack) { serialized << ack; }
+void MsgAck::postponed_parse(HotStuffCore *hsc) {
+    ack.hsc = hsc;
+    serialized >> ack;
+}
+
+const opcode_t MsgPreCommit::opcode;
+MsgPreCommit::MsgPreCommit(const PreCommit &preCommit) { serialized << preCommit; }
+void MsgPreCommit::postponed_parse(HotStuffCore *hsc) {
+    preCommit.hsc = hsc;
+    serialized >> preCommit;
+}
+
 void MsgRespBlock::postponed_parse(HotStuffCore *hsc) {
     uint32_t size;
     serialized >> size;
@@ -484,6 +505,10 @@ HotStuffBase::HotStuffBase(uint32_t blk_size,
     pn.reg_handler(salticidae::generic_bind(&HotStuffBase::req_blk_handler, this, _1, _2));
     pn.reg_handler(salticidae::generic_bind(&HotStuffBase::resp_blk_handler, this, _1, _2));
     pn.reg_conn_handler(salticidae::generic_bind(&HotStuffBase::conn_handler, this, _1, _2));
+    pn.reg_handler(salticidae::generic_bind(&HotStuffBase::echo_handler, this, _1, _2));
+    pn.reg_handler(salticidae::generic_bind(&HotStuffBase::ack_handler, this, _1, _2));
+    pn.reg_handler(salticidae::generic_bind(&HotStuffBase::pre_commit_handler, this, _1, _2));
+
     pn.start();
     pn.listen(listen_addr);
 }
@@ -596,4 +621,109 @@ void HotStuffBase::start(
     });
 }
 
+void HotStuffBase::set_propagate_timer(const Echo &echo, double t_sec) {
+    auto &timer = propagate_timers[echo.blk_hash] =
+                          TimerEvent(ec, [this, blk_hash=echo.blk_hash](TimerEvent &) {
+                              stop_propagate_timer(blk_hash);
+                          });
+    timer.add(t_sec);
+}
+
+void HotStuffBase::stop_propagate_timer(const uint256_t &blk_hash) {
+    propagate_timers.erase(blk_hash);
+}
+
+bool HotStuffBase::is_propagate_timeout(const uint256_t &msg_hash){
+    return propagate_timers[msg_hash]) ? false: true;
+}
+
+void HotStuffBase::set_ack_timer(const Ack &ack, double t_sec) {
+    auto &timer = ack_timers[ack.blk_hash] =
+                          TimerEvent(ec, [this, blk_hash=ack.blk_hash](TimerEvent &) {
+                              stop_ack_timer(blk_hash);
+                          });
+    timer.add(t_sec);
+}
+
+void HotStuffBase::stop_ack_timer(const uint256_t &msg_hash){
+    ack_timers.erase(msg_hash);
+}
+
+bool HotStuffBase::is_ack_timeout(const uint256_t &msg_hash){
+    return ack_timers[msg_hash]) ? false: true;
+}
+
+
+void HotStuffBase::echo_handler(MsgEcho &&msg, const Net::conn_t &conn) {
+    const NetAddr &peer = conn->get_peer_addr();
+    if (peer.is_null()) return;
+    msg.postponed_parse(this);
+
+    //Todo: fix async_deliver of non-block type echoes
+
+    RcObj<Echo> e(new Echo(std::move(msg.echo)));
+    promise::all(std::vector<promise_t>{
+            async_deliver_blk(e->blk_hash, peer),
+            e->verify(vpool),
+    }).then([this, e=std::move(e)](const promise::values_t values) {
+        if (!promise::any_cast<bool>(values[1]))
+            LOG_WARN("invalid echo from %d", v->voter);
+        else
+            on_receive_echo(*e);
+    });
+}
+
+void HotStuffBase::ack_handler(MsgAck &&msg, const Net::conn_t &conn) {
+    const NetAddr &peer = conn->get_peer_addr();
+    if (peer.is_null()) return;
+    msg.postponed_parse(this);
+
+    //Todo: fix async_deliver of non-block type echoes
+
+    RcObj<Ack> e(new Ack(std::move(msg.ack)));
+    promise::all(std::vector<promise_t>{
+            e->verify(vpool)
+    }).then([this, e=std::move(e)](const promise::values_t values) {
+        if (!promise::any_cast<bool>(values[0]))
+            LOG_WARN("invalid ack from %d", v->voter);
+        else
+            on_receive_ack(*e);
+    });
+}
+
+void HotStuffBase::set_pre_commit_timer(const block_t &blk, double t_sec) {
+#ifdef SYNCHS_NOTIMER
+    on_commit_timeout(blk);
+#else
+    auto height = blk->get_height();
+    auto &timer = precommit_timers[height] =
+                          TimerEvent(ec, [this, blk=std::move(blk), height](TimerEvent &) {
+                              on_pre_commit_timeout(blk);
+                              stop_commit_timer(height);
+                          });
+    timer.add(t_sec);
+#endif
+
+}
+
+void HotStuffBase::stop_pre_commit_timer(uint32_t height) {
+    precommit_timers.erase(height);
+}
+
+void HotStuffBase::pre_commit_handler(MsgPreCommit &&msg, const Net::conn_t &conn) {
+    const NetAddr &peer = conn->get_peer_addr();
+    if (peer.is_null()) return;
+    msg.postponed_parse(this);
+
+    //Todo: fix async_deliver of non-block type echoes
+
+    RcObj<PreCommit> p(new PreCommit(std::move(msg.preCommit)));
+    promise::all(std::vector<promise_t>{
+            p->verify(vpool)
+    }).then([this, p=std::move(p)](const promise::values_t values) {
+        if (!promise::any_cast<bool>(values[0]))
+            LOG_WARN("invalid pre_commit from %d", v->voter);
+        else
+            on_receive_pre_commit(*p);
+    });
 }

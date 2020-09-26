@@ -135,6 +135,7 @@ class Block {
     int8_t decision;
 
     std::unordered_set<ReplicaID> voted;
+    std::unordered_set<ReplicaID> preCommitted;
 
     public:
     Block():

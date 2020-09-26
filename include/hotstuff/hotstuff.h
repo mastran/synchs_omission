@@ -105,6 +105,33 @@ struct MsgRespBlock {
     void postponed_parse(HotStuffCore *hsc);
 };
 
+struct MsgEcho {
+    static const opcode_t opcode = 0x7;
+    DataStream serialized;
+    Echo echo;
+    MsgEcho(const Echo &);
+    MsgEcho(DataStream &&s): serialized(std::move(s)) {}
+    void postponed_parse(HotStuffCore *hsc);
+};
+
+struct MsgAck {
+    static const opcode_t opcode = 0x8;
+    DataStream serialized;
+    Ack ack;
+    MsgAck(const Ack &);
+    MsgAck(DataStream &&s): serialized(std::move(s)) {}
+    void postponed_parse(HotStuffCore *hsc);
+};
+
+struct MsgPreCommit {
+    static const opcode_t opcode = 0x9;
+    DataStream serialized;
+    PreCommit preCommit;
+    MsgPreCommit(const PreCommit &);
+    MsgPreCommit(DataStream &&s): serialized(std::move(s)) {}
+    void postponed_parse(HotStuffCore *hsc);
+};
+
 using promise::promise_t;
 
 class HotStuffBase;
@@ -298,6 +325,18 @@ class HotStuffBase: public HotStuffCore {
     void do_decide(Finality &&) override;
     void do_consensus(const block_t &blk) override;
 
+    void do_broadcast_echo(const Echo &echo){
+        _do_broadcast<Echo, MsgEcho>(echo);
+    }
+
+    void do_broadcast_ack(const Ack &ack){
+        _do_broadcast<Ack, MsgAck>(ack);
+    }
+
+    void do_broadcast_pre_commit(const PreCommit &preCommit){
+        _do_broadcast<PreCommit, MsgPreCommit>(preCommit);
+    }
+
     protected:
 
     /** Called to replicate the execution of a command, the application should
@@ -340,6 +379,27 @@ class HotStuffBase: public HotStuffCore {
     promise_t async_fetch_blk(const uint256_t &blk_hash, const NetAddr *replica_id, bool fetch_now = true);
     /** Returns a promise resolved (with block_t blk) when Block is delivered (i.e. prefix is fetched). */
     promise_t async_deliver_blk(const uint256_t &blk_hash,  const NetAddr &replica_id);
+
+    private:
+    void set_propagate_timer(const Echo &echo, double t_sec) override;
+    void stop_propagate_timer(const uint256_t &msg_hash) override;
+    bool is_propagate_timeout(const uint256_t &msg_hash) override;
+
+    void set_ack_timer(const Ack &ack, double t_sec) override;
+    void stop_ack_timer(const uint256_t &msg_hash) override;
+    bool is_ack_timeout(const uint256_t &msg_hash) override;
+
+    inline void echo_handler(MsgEcho &&, const Net::conn_t &);
+    inline void ack_handler(MsgAck &&, const Net::conn_t &);
+    inline void pre_commit_handler(MsgPreCommit &&, const Net::conn_t &);
+    void set_pre_commit_timer(const block_t &blk, double t_sec) override;
+    void stop_pre_commit_timer(uint32_t height) override;
+
+    protected:
+    std::unordered_map<const uint256_t, TimerEvent> propagate_timers;
+    std::unordered_map<const uint256_t, TimerEvent> ack_timers;
+    std::unordered_map<uint32_t, TimerEvent> precommit_timers;
+
 };
 
 /** HotStuff protocol (templated by cryptographic implementation). */
