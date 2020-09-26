@@ -490,6 +490,7 @@ void HotStuffCore::on_receive_echo(const Echo &echo){
 
             Ack ack(id, msg_hash, PropagateType::BLOCK,
                     create_part_cert(*priv_key, Ack::proof_obj_hash(msg_hash)), this);
+
             do_multicast_ack(ack, propagate_echos[msg_hash]);
             auto iter = propagate_echos[msg_hash].find(id);
             if (iter != propagate_echos[msg_hash].end())
@@ -502,9 +503,10 @@ void HotStuffCore::on_receive_echo(const Echo &echo){
     if (qsize + 1 > config.nmajority && !is_ack_timeout(msg_hash)) {
         Ack ack(id, msg_hash, PropagateType::BLOCK,
                 create_part_cert(*priv_key, Ack::proof_obj_hash(msg_hash)), this);        
-        do_send_ack(ack, echo.rid);
         if (echo.rid == id)
             on_receive_ack(ack);
+        else
+            do_send_ack(ack, echo.rid);
     }
 }
 

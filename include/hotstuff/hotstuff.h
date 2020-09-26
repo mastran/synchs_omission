@@ -335,8 +335,10 @@ class HotStuffBase: public HotStuffCore {
 
     void do_multicast_ack(const Ack &ack, std::unordered_set<ReplicaID> dests){
         std::vector<NetAddr> dest_addrs;
-        for(ReplicaID dest: dests)
+        for(ReplicaID dest: dests) {
+            if (dest == id) continue;
             dest_addrs.push_back(get_config().get_addr(dest));
+        }
         pn.multicast_msg(MsgAck(ack), dest_addrs);
     }
 
