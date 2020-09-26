@@ -333,7 +333,7 @@ class HotStuffBase: public HotStuffCore {
         _do_broadcast<Ack, MsgAck>(ack);
     }
 
-    void do_multicast_ack(const Ack &ack, std::unordered_set<ReplicaID> dests){
+    void do_multicast_ack(const Ack &ack, const std::unordered_set<ReplicaID> &dests){
         std::vector<NetAddr> dest_addrs;
         for(ReplicaID dest: dests) {
             if (dest == id) continue;

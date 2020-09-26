@@ -483,7 +483,7 @@ void HotStuffCore::on_receive_echo(const Echo &echo){
         if(echo.opcode == PropagateType::BLOCK) {
             block_t blk = get_delivered_blk(echo.blk_hash);
 
-            // Todo: fix proposer and infinite forwarding
+            // Todo: fix proposer
             Proposal proposal(id, blk, this);
             do_broadcast_proposal(proposal);
             //Todo: may be propose next blocks.
