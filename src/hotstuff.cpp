@@ -648,10 +648,11 @@ void HotStuffBase::set_ack_timer(const Ack &ack, double t_sec) {
 
 void HotStuffBase::stop_ack_timer(const uint256_t &msg_hash){
     ack_timers.erase(msg_hash);
+    ack_timeouts[msg_hash] = true;    
 }
 
 bool HotStuffBase::is_ack_timeout(const uint256_t &msg_hash){
-    return ack_timers[msg_hash] ? false: true;
+    return ack_timeouts[msg_hash];
 }
 
 

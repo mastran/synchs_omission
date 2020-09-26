@@ -333,6 +333,17 @@ class HotStuffBase: public HotStuffCore {
         _do_broadcast<Ack, MsgAck>(ack);
     }
 
+    void do_multicast_ack(const Ack &ack, std::unordered_set<ReplicaID> dests){
+        std::vector<NetAddr> dest_addrs;
+        for(ReplicaID dest: dests)
+            dest_addrs.push_back(get_config().get_addr(dest));
+        pn.multicast_msg(MsgAck(ack), dest_addrs);
+    }
+
+    void do_send_ack(const Ack &ack, ReplicaID dest){
+        pn.send_msg(MsgAck(ack), get_config().get_addr(dest));
+    }
+
     void do_broadcast_pre_commit(const PreCommit &preCommit){
         _do_broadcast<PreCommit, MsgPreCommit>(preCommit);
     }
@@ -401,6 +412,7 @@ class HotStuffBase: public HotStuffCore {
     std::unordered_map<uint32_t, TimerEvent> precommit_timers;
 
     std::unordered_map<const uint256_t, bool> propagate_timeouts;
+    std::unordered_map<const uint256_t, bool> ack_timeouts;    
 };
 
 /** HotStuff protocol (templated by cryptographic implementation). */

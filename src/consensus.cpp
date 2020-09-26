@@ -472,7 +472,7 @@ void HotStuffCore::on_receive_echo(const Echo &echo){
     assert(echo.cert);
 
     size_t qsize = propagate_echos[msg_hash].size();
-    if (qsize >= config.nmajority) return;
+
     if (!propagate_echos[msg_hash].insert(echo.rid).second)
     {
         LOG_WARN("duplicate echo for %s from %d", get_hex10(msg_hash).c_str(), echo.rid);
@@ -490,11 +490,21 @@ void HotStuffCore::on_receive_echo(const Echo &echo){
 
             Ack ack(id, msg_hash, PropagateType::BLOCK,
                     create_part_cert(*priv_key, Ack::proof_obj_hash(msg_hash)), this);
-            do_broadcast_ack(ack);
-            on_receive_ack(ack);
+            do_multicast_ack(ack, propagate_echos[msg_hash]);
+            auto iter = propagate_echos[msg_hash].find(id);
+            if (iter != propagate_echos[msg_hash].end())
+                on_receive_ack(ack);
             set_ack_timer(ack, 2 * config.delta);
         }
         //Todo: Add conditions for propagation of blame.
+    }
+
+    if (qsize + 1 > config.nmajority && !is_ack_timeout(msg_hash)) {
+        Ack ack(id, msg_hash, PropagateType::BLOCK,
+                create_part_cert(*priv_key, Ack::proof_obj_hash(msg_hash)), this);        
+        do_send_ack(ack, echo.rid);
+        if (echo.rid == id)
+            on_receive_ack(ack);
     }
 }
 
