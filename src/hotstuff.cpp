@@ -638,6 +638,10 @@ bool HotStuffBase::is_propagate_timeout(const uint256_t &msg_hash){
     return propagate_timeouts[msg_hash];
 }
 
+ReplicaID HotStuffBase::get_proposer(){
+    return pmaker->get_proposer();
+}
+
 void HotStuffBase::set_ack_timer(const Ack &ack, double t_sec) {
     auto &timer = ack_timers[ack.blk_hash] =
                           TimerEvent(ec, [this, blk_hash=ack.blk_hash](TimerEvent &) {

@@ -329,6 +329,10 @@ class HotStuffBase: public HotStuffCore {
         _do_broadcast<Echo, MsgEcho>(echo);
     }
 
+    void do_send_echo(const Echo &echo, ReplicaID dest) override {
+        pn.send_msg(MsgEcho(echo), get_config().get_addr(dest));
+    }
+
     void do_broadcast_ack(const Ack &ack) override {
         _do_broadcast<Ack, MsgAck>(ack);
     }
@@ -397,6 +401,7 @@ class HotStuffBase: public HotStuffCore {
     void set_propagate_timer(const Echo &echo, double t_sec) override;
     void stop_propagate_timer(const uint256_t &msg_hash) override;
     bool is_propagate_timeout(const uint256_t &msg_hash) override;
+    ReplicaID get_proposer() override;
 
     void set_ack_timer(const Ack &ack, double t_sec) override;
     void stop_ack_timer(const uint256_t &msg_hash) override;

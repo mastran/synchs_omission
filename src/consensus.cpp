@@ -173,16 +173,18 @@ block_t HotStuffCore::on_propose(const std::vector<uint256_t> &cmds,
     if (parents.empty())
         throw std::runtime_error("empty parents");
     for (const auto &_: parents) tails.erase(_);
+    bool is_commit_height = (parents[0]->height + 1) % commit_interval == 0;
     /* create the new block */
     block_t bnew = storage->add_blk(
         new Block(parents, cmds,
-                last_qc_ref != hqc.first ? hqc.second->clone(): nullptr,
+                is_commit_height && (last_qc_ref != hqc.first) ? hqc.second->clone(): nullptr,
                 std::move(extra),
             parents[0]->height + 1,
-            last_qc_ref != hqc.first ? hqc.first: nullptr,
+            is_commit_height && (last_qc_ref != hqc.first) ? hqc.first: nullptr,
             nullptr
         ));
-    last_qc_ref = hqc.first;
+    if (is_commit_height)
+        last_qc_ref = hqc.first;
     const uint256_t bnew_hash = bnew->get_hash();
     bnew->self_qc = create_quorum_cert(Vote::proof_obj_hash(bnew_hash));
     on_deliver_blk(bnew);
@@ -466,9 +468,16 @@ void HotStuffCore::_propagate_blk(const block_t &blk) {
     Echo echo(id, blk_hash, PropagateType::BLOCK,
                 create_part_cert(*priv_key, Echo::proof_obj_hash(blk_hash)), this);
 
-    do_broadcast_echo(echo);
-    on_receive_echo(echo);
-    set_propagate_timer(echo, 3 * config.delta);
+    if (blk->get_height() % commit_interval == 0){
+        do_broadcast_echo(echo);
+        on_receive_echo(echo);
+        set_propagate_timer(echo, 3 * config.delta);
+    } else {
+        if (id == get_proposer())
+            on_receive_echo(echo);
+        else
+            do_send_echo(echo, get_proposer());
+    }
 }
 
 void HotStuffCore::on_receive_echo(const Echo &echo){
@@ -489,6 +498,8 @@ void HotStuffCore::on_receive_echo(const Echo &echo){
             block_t blk = get_delivered_blk(echo.blk_hash);
             on_qc_finish(blk);
 
+            if (blk->get_height() % commit_interval != 0) return;
+
             // Todo: fix proposer
             Proposal proposal(id, blk, this);
             do_broadcast_proposal(proposal);
@@ -506,6 +517,9 @@ void HotStuffCore::on_receive_echo(const Echo &echo){
     }
 
     if (qsize + 1 > config.nmajority && !is_ack_timeout(msg_hash)) {
+        block_t blk = get_delivered_blk(echo.blk_hash);
+        if (blk->get_height() % commit_interval != 0) return;        
+
         Ack ack(id, msg_hash, PropagateType::BLOCK,
                 create_part_cert(*priv_key, Ack::proof_obj_hash(msg_hash)), this);        
         if (echo.rid == id)

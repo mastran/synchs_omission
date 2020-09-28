@@ -89,6 +89,7 @@ class HotStuffCore {
 
     protected:
     ReplicaID id;                  /**< identity of the replica itself */
+    uint32_t commit_interval = 1;
 
     public:
     BoxObj<EntityStorage> storage;
@@ -218,9 +219,11 @@ class HotStuffCore {
     std::unordered_map<const uint256_t, std::unordered_set<ReplicaID>> propagate_acks;
 
     virtual void do_broadcast_echo(const Echo &echo) = 0;
+    virtual void do_send_echo(const Echo &echo, ReplicaID dest) = 0; 
     virtual void set_propagate_timer(const Echo &echo, double t_sec) = 0;
     virtual void stop_propagate_timer(const uint256_t &msg_hash) = 0;
     virtual bool is_propagate_timeout(const uint256_t &msg_hash) = 0;
+    virtual ReplicaID get_proposer() = 0;
 
     virtual void do_broadcast_ack(const Ack &ack) = 0;
     virtual void do_multicast_ack(const Ack &ack, const std::unordered_set<ReplicaID> &dests) = 0;
