@@ -64,7 +64,8 @@ void Block::unserialize(DataStream &s, HotStuffCore *hsc) {
         auto base = s.get_data_inplace(n);
         extra = bytearray_t(base, base + n);
     }
-    this->hash = salticidae::get_hash(*this);
+//    this->hash = salticidae::get_hash(*this);
+    this->hash = _get_hash();
 }
 
 bool Block::verify(const ReplicaConfig &config) const {
@@ -79,6 +80,19 @@ promise_t Block::verify(const ReplicaConfig &config, VeriPool &vpool) const {
             promise_t([](promise_t &pm) { pm.resolve(false); }) :
             qc->verify(config, vpool)) :
     promise_t([](promise_t &pm) { pm.resolve(true); }));
+}
+
+/** The following function removes qc from block hash */
+uint256_t Block::_get_hash() {
+    DataStream s;
+    s << htole((uint32_t)parent_hashes.size());
+    for (const auto &hash: parent_hashes)
+        s << hash;
+    s << htole((uint32_t)cmds.size());
+    for (auto cmd: cmds)
+        s << cmd;
+    s << htole((uint32_t)extra.size()) << extra;
+    return s.get_hash();
 }
 
 }

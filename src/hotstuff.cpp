@@ -680,13 +680,12 @@ void HotStuffBase::ack_handler(MsgAck &&msg, const Net::conn_t &conn) {
     if (peer.is_null()) return;
     msg.postponed_parse(this);
 
-    //Todo: fix async_deliver of non-block type echoes
-
     RcObj<Ack> e(new Ack(std::move(msg.ack)));
     promise::all(std::vector<promise_t>{
+            async_deliver_blk(e->blk_hash, peer),
             e->verify(vpool)
     }).then([this, e=std::move(e)](const promise::values_t values) {
-        if (!promise::any_cast<bool>(values[0]))
+        if (!promise::any_cast<bool>(values[1]))
             LOG_WARN("invalid ack from %d", e->rid);
         else
             on_receive_ack(*e);
@@ -717,13 +716,12 @@ void HotStuffBase::pre_commit_handler(MsgPreCommit &&msg, const Net::conn_t &con
     if (peer.is_null()) return;
     msg.postponed_parse(this);
 
-    //Todo: fix async_deliver of non-block type echoes
-
     RcObj<PreCommit> p(new PreCommit(std::move(msg.preCommit)));
     promise::all(std::vector<promise_t>{
+            async_deliver_blk(p->blk_hash, peer),
             p->verify(vpool)
     }).then([this, p=std::move(p)](const promise::values_t values) {
-        if (!promise::any_cast<bool>(values[0]))
+        if (!promise::any_cast<bool>(values[1]))
             LOG_WARN("invalid pre_commit from %d", p->rid);
         else
             on_receive_pre_commit(*p);

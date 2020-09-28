@@ -102,7 +102,7 @@ void HotStuffCore::check_commit(const block_t &blk) {
     { /* TODO: also commit the uncles/aunts */
         commit_queue.push_back(b);
     }
-    if (b != b_exec)
+    if (b != b_exec && b->decision != 1)
         throw std::runtime_error("safety breached :( " +
                                 std::string(*blk) + " " +
                                 std::string(*b_exec));
@@ -176,11 +176,13 @@ block_t HotStuffCore::on_propose(const std::vector<uint256_t> &cmds,
     /* create the new block */
     block_t bnew = storage->add_blk(
         new Block(parents, cmds,
-            hqc.second->clone(), std::move(extra),
+                last_qc_ref != hqc.first ? hqc.second->clone(): nullptr,
+                std::move(extra),
             parents[0]->height + 1,
-            hqc.first,
+            last_qc_ref != hqc.first ? hqc.first: nullptr,
             nullptr
         ));
+    last_qc_ref = hqc.first;
     const uint256_t bnew_hash = bnew->get_hash();
     bnew->self_qc = create_quorum_cert(Vote::proof_obj_hash(bnew_hash));
     on_deliver_blk(bnew);
@@ -234,6 +236,8 @@ void HotStuffCore::on_receive_proposal(const Proposal &prop) {
             opinion = false;
     }
     LOG_PROTO("now state: %s", std::string(*this).c_str());
+
+    // Todo: Figure out if a replica (non-leader) needs on_qc_finish.
     if (bnew->qc_ref)
         on_qc_finish(bnew->qc_ref);
     finished_propose[bnew] = true;
@@ -272,7 +276,7 @@ void HotStuffCore::on_receive_vote(const Vote &vote) {
     {
         qc->compute();
         update_hqc(blk, qc);
-        on_qc_finish(blk);
+//        on_qc_finish(blk);
     }
 }
 
@@ -334,6 +338,7 @@ void HotStuffCore::on_init(uint32_t nfaulty, double delta) {
     b0->self_qc = b0->qc->clone();
     b0->qc_ref = b0;
     hqc = std::make_pair(b0, b0->qc->clone());
+    last_qc_ref = b0;
 }
 
 void HotStuffCore::prune(uint32_t staleness) {
@@ -367,7 +372,7 @@ void HotStuffCore::add_replica(ReplicaID rid, const NetAddr &addr,
 }
 
 promise_t HotStuffCore::async_qc_finish(const block_t &blk) {
-    if (blk->voted.size() >= config.nmajority)
+    if (blk->height == 0 || propagate_echos[blk->hash].size() >= config.nmajority)
         return promise_t([](promise_t &pm) {
             pm.resolve();
         });
@@ -482,11 +487,11 @@ void HotStuffCore::on_receive_echo(const Echo &echo){
     {
         if(echo.opcode == PropagateType::BLOCK) {
             block_t blk = get_delivered_blk(echo.blk_hash);
+            on_qc_finish(blk);
 
             // Todo: fix proposer
             Proposal proposal(id, blk, this);
             do_broadcast_proposal(proposal);
-            //Todo: may be propose next blocks.
 
             Ack ack(id, msg_hash, PropagateType::BLOCK,
                     create_part_cert(*priv_key, Ack::proof_obj_hash(msg_hash)), this);
@@ -534,13 +539,14 @@ void HotStuffCore::on_receive_ack(const Ack &ack){
 
 void HotStuffCore::on_propose_propagated(const uint256_t &blk_hash) {
     if (view_trans) return;
-    LOG_PROTO("propagated %s", std::string(blk_hash.to_hex()).c_str());
+    LOG_PROTO("propagated %s", get_hex10(blk_hash).c_str());
     block_t blk = get_delivered_blk(blk_hash);
     sanity_check_delivered(blk);
 
     if (!vote_disabled) _vote(blk);
 
-    set_pre_commit_timer(blk->get_parents()[0], 2*config.delta);
+    if(blk->qc_ref)
+        set_pre_commit_timer(blk->qc_ref, 2*config.delta);
 }
 
 void HotStuffCore::on_pre_commit_timeout(const block_t &blk) {

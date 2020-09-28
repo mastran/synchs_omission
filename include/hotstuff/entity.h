@@ -164,7 +164,7 @@ class Block {
             qc(std::move(qc)),
             qc_ref_hash(qc_ref ? qc_ref->get_hash() : uint256_t()),
             extra(std::move(extra)),
-            hash(salticidae::get_hash(*this)),
+            hash(_get_hash()),
             parents(parents),
             qc_ref(qc_ref),
             self_qc(std::move(self_qc)),
@@ -216,6 +216,10 @@ class Block {
           << "qc_ref=" << (qc_ref ? get_hex10(qc_ref->get_hash()) : "null") << ">";
         return std::move(s);
     }
+
+    private:
+    uint256_t _get_hash();
+
 };
 
 struct BlockHeightCmp {

@@ -325,15 +325,15 @@ class HotStuffBase: public HotStuffCore {
     void do_decide(Finality &&) override;
     void do_consensus(const block_t &blk) override;
 
-    void do_broadcast_echo(const Echo &echo){
+    void do_broadcast_echo(const Echo &echo) override{
         _do_broadcast<Echo, MsgEcho>(echo);
     }
 
-    void do_broadcast_ack(const Ack &ack){
+    void do_broadcast_ack(const Ack &ack) override {
         _do_broadcast<Ack, MsgAck>(ack);
     }
 
-    void do_multicast_ack(const Ack &ack, const std::unordered_set<ReplicaID> &dests){
+    void do_multicast_ack(const Ack &ack, const std::unordered_set<ReplicaID> &dests) override {
         std::vector<NetAddr> dest_addrs;
         for(ReplicaID dest: dests) {
             if (dest == id) continue;
@@ -342,11 +342,11 @@ class HotStuffBase: public HotStuffCore {
         pn.multicast_msg(MsgAck(ack), dest_addrs);
     }
 
-    void do_send_ack(const Ack &ack, ReplicaID dest){
+    void do_send_ack(const Ack &ack, ReplicaID dest) override {
         pn.send_msg(MsgAck(ack), get_config().get_addr(dest));
     }
 
-    void do_broadcast_pre_commit(const PreCommit &preCommit){
+    void do_broadcast_pre_commit(const PreCommit &preCommit) override {
         _do_broadcast<PreCommit, MsgPreCommit>(preCommit);
     }
 

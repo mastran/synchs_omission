@@ -208,6 +208,7 @@ class HotStuffCore {
     void set_vote_disabled(bool f) { vote_disabled = f; }
 
     private:
+    block_t last_qc_ref;
     void _propagate_blk(const block_t &blk);
     void on_propose_propagated(const uint256_t &blk_hash);
 
